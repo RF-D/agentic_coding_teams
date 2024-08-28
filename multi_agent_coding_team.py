@@ -5,6 +5,10 @@ from termcolor import colored
 from unified import UnifiedApis
 import subprocess
 import os
+import sys
+import re
+import importlib
+import pkg_resources
 
 
 @dataclass
@@ -37,6 +41,24 @@ class TeamMember:
             return f"{self.name} ({self.role}): {response}"
         return f"{self.name} ({self.role}) cannot discuss without an AI agent."
 
+    async def generate_report(self, project_description: str, discussion: str) -> str:
+        prompt = f"""Based on the following project description and team discussion, generate a report from your perspective as {self.role}. 
+        Include your insights, concerns, and suggestions for the project.
+
+        Project Description: {project_description}
+
+        Team Discussion: {discussion}
+
+        Please structure your report using XML tags as follows:
+        <report>
+            <insights>Your key insights here</insights>
+            <concerns>Any concerns you have about the project</concerns>
+            <suggestions>Your suggestions for improvement or next steps</suggestions>
+        </report>
+        """
+        report = await self.ai_agent.chat_async(prompt)
+        return f"{self.name} ({self.role}) Report:\n{report}"
+
 
 @dataclass
 class ProjectLead(TeamMember):
@@ -49,7 +71,25 @@ class ProjectLead(TeamMember):
         system_message = f"""You are {name}, the Project Lead and Full-Stack Developer of the team.
 Your role involves overseeing the project, making high-level decisions, and contributing to both frontend and backend development.
 Your skills include: Python, JavaScript, React, Node.js, and Project Management.
-In discussions, provide insights that reflect your leadership role and technical expertise."""
+In discussions, provide insights that reflect your leadership role and technical expertise.
+When asked to generate code, you may create multiple files if necessary for the project structure.
+Please structure your responses using XML tags for easier parsing. For example:
+<response>
+    <insight>Your technical insight here</insight>
+    <decision>Your project decision here</decision>
+    <suggestion>Your suggestion for the team here</suggestion>
+</response>
+When generating multiple files, use the following structure:
+<files>
+    <file>
+        <name>filename.ext</name>
+        <content>
+            // File content here
+        </content>
+    </file>
+    // Repeat for each file
+</files>
+"""
 
         self.ai_agent = UnifiedApis(
             name="Claude",
@@ -57,9 +97,10 @@ In discussions, provide insights that reflect your leadership role and technical
             model="claude-3-5-sonnet-20240620",
             use_async=True,
             print_color="yellow",
+            json_mode=False,
+            use_cache=False,
         )
 
-        # Set the system message after initializing the UnifiedApis instance
         self.ai_agent.set_system_message(system_message)
 
     def coordinate_team(self):
@@ -69,6 +110,41 @@ In discussions, provide insights that reflect your leadership role and technical
                 self.ai_agent.print_color,
             )
         )
+
+    async def generate_multi_file_code(self, project_description: str, discussion: str):
+        prompt = f"""Based on the following project description and team discussion, generate a multi-file code structure for the project. 
+        Include all necessary files for a complete project structure.
+
+        Project Description: {project_description}
+
+        Team Discussion: {discussion}
+
+        Please provide the code structure using the following format:
+        <files>
+            <file>
+                <name>filename.ext</name>
+                <content>
+                    // File content here
+                </content>
+            </file>
+            // Repeat for each file
+        </files>
+        """
+        response = await self.ai_agent.chat_async(prompt)
+        return self.parse_multi_file_response(response)
+
+    def parse_multi_file_response(self, response: str) -> Dict[str, str]:
+        files = {}
+        file_matches = re.finditer(
+            r"<file>.*?<name>(.*?)</name>.*?<content>(.*?)</content>.*?</file>",
+            response,
+            re.DOTALL,
+        )
+        for match in file_matches:
+            filename = match.group(1).strip()
+            content = match.group(2).strip()
+            files[filename] = content
+        return files
 
 
 @dataclass
@@ -348,7 +424,6 @@ Team Discussion:
 {discussion}
 
 Provide the full code wrapped in <code></code> tags."""
-
         code_response = await lead_developer.discuss(prompt)
 
         code = code_response.split("<code>")[1].split("</code>")[0].strip()
@@ -357,48 +432,203 @@ Provide the full code wrapped in <code></code> tags."""
         print(colored(f"Initial code written to {file_path}", "green"))
         return code
 
-    async def error_correction_cycle(self, file_path: str):
+    async def error_correction_cycle(self, project_path: str):
         while True:
-            print(colored("\nExecuting code...", "cyan"))
+            error_output = self.execute_project(project_path)
+            if not error_output:
+                print(colored("No errors found. Project runs successfully!", "green"))
+                break
+
+            print(colored(f"Error found:\n{error_output}", "red"))
+
+            # Check for ModuleNotFoundError
+            module_not_found = re.search(
+                r"ModuleNotFoundError: No module named '(\w+)'", error_output
+            )
+            if module_not_found:
+                module_name = module_not_found.group(1)
+                if await self.install_missing_dependencies(module_name, project_path):
+                    continue
+                else:
+                    print(
+                        colored(
+                            f"Unable to resolve dependency issue for {module_name}. Trying general error fixing.",
+                            "yellow",
+                        )
+                    )
+
+            # Handle all other errors generically
+            fixed = await self.fix_error(error_output, project_path)
+            if not fixed:
+                print(
+                    colored(
+                        "Unable to fix the error automatically. Manual intervention may be required.",
+                        "yellow",
+                    )
+                )
+                break
+
+    async def install_missing_dependencies(self, module_name: str, project_path: str):
+        try:
+            importlib.import_module(module_name)
+            print(colored(f"{module_name} is already installed.", "green"))
+            return True
+        except ImportError:
+            pass
+
+        print(
+            colored(
+                f"The following package is required but not installed: {module_name}",
+                "yellow",
+            )
+        )
+        user_input = input(
+            colored(f"Do you want to install {module_name}? (yes/no): ", "cyan")
+        ).lower()
+
+        if user_input == "yes":
             try:
-                result = subprocess.run(
-                    ["python", file_path], capture_output=True, text=True, check=True
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", module_name]
                 )
-                print(colored("Code execution successful!", "green"))
-                if result.stdout:
-                    print(colored("Output:", "blue"))
-                    print(result.stdout)
-                return  # Exit the method if execution is successful
-            except subprocess.CalledProcessError as e:
-                error_message = e.stderr
-                print(colored(f"Error detected: {error_message}", "red"))
-                with open(file_path, "r") as f:
-                    current_code = f.read()
+                print(colored(f"Successfully installed {module_name}", "green"))
+                return True
+            except subprocess.CalledProcessError:
+                print(colored(f"Failed to install {module_name}", "red"))
+                return await self.handle_installation_failure(module_name, project_path)
 
-                print(colored("Attempting to fix the error...", "yellow"))
-                correction_prompt = f"Error message:\n{error_message}\n\nCurrent code:\n{current_code}\n\nPlease fix the error and provide the full corrected code wrapped in <code></code> tags."
-                corrected_code_response = await self.error_corrector.chat_async(
-                    correction_prompt
+        return False
+
+    async def handle_installation_failure(
+        self, module_name: str, project_path: str
+    ) -> bool:
+        print(
+            colored(
+                f"Unable to install {module_name}. Attempting to find alternatives...",
+                "yellow",
+            )
+        )
+
+        prompt = f"""
+        The package '{module_name}' could not be installed. Please suggest alternatives or a workaround.
+        Consider the following options:
+        1. Suggest an alternative package that provides similar functionality.
+        2. Provide a minimal implementation of the required functionality.
+        3. Suggest modifications to the code to work without this package.
+
+        Please format your response as follows:
+        <suggestion>
+        [Your suggestion here]
+        </suggestion>
+        <code_changes>
+        [Any necessary code changes in the format: filename:line_number:new_code]
+        </code_changes>
+        """
+
+        response = await self.error_corrector.chat_async(prompt)
+        suggestion, code_changes = self.parse_ai_response(response)
+
+        print(colored("AI Suggestion:", "cyan"))
+        print(suggestion)
+
+        if code_changes:
+            user_input = input(
+                colored(
+                    "Do you want to apply the suggested changes? (yes/no): ", "cyan"
                 )
+            ).lower()
+            if user_input == "yes":
+                self.apply_code_changes(code_changes, project_path)
+                return True
 
-                corrected_code = (
-                    corrected_code_response.split("<code>")[1]
-                    .split("</code>")[0]
-                    .strip()
+        return False
+
+    async def fix_error(self, error_output: str, project_path: str) -> bool:
+        prompt = f"""
+        An error occurred in the project. Please analyze the error and suggest a fix.
+        Do not use any hardcoded solutions for specific libraries.
+        Provide a general solution that addresses the root cause of the error.
+
+        Error output:
+        {error_output}
+
+        Please provide your solution in the following format:
+        <solution>
+        [Your explanation and suggested fix here]
+        </solution>
+        <code_changes>
+        [Any code changes, if necessary, in the format: filename:line_number:new_code]
+        </code_changes>
+        """
+
+        response = await self.error_corrector.chat_async(prompt)
+
+        solution, code_changes = self.parse_ai_response(response)
+
+        print(colored("AI Suggested Solution:", "cyan"))
+        print(solution)
+
+        if code_changes:
+            user_input = input(
+                colored(
+                    "Do you want to apply the suggested code changes? (yes/no): ",
+                    "cyan",
                 )
-                with open(file_path, "w") as f:
-                    f.write(corrected_code)
-                print(colored("Applied fix. Retrying execution...", "magenta"))
+            ).lower()
+            if user_input == "yes":
+                self.apply_code_changes(code_changes, project_path)
+                return True
 
-    async def feedback_improvement_cycle(self, file_path: str, user_feedback: str):
-        with open(file_path, "r") as f:
-            current_code = f.read()
+        return False
 
+    def parse_ai_response(self, response: str):
+        solution_match = re.search(r"<solution>(.*?)</solution>", response, re.DOTALL)
+        code_changes_match = re.search(
+            r"<code_changes>(.*?)</code_changes>", response, re.DOTALL
+        )
+
+        solution = solution_match.group(1).strip() if solution_match else ""
+        code_changes = code_changes_match.group(1).strip() if code_changes_match else ""
+
+        return solution, code_changes
+
+    def apply_code_changes(self, code_changes: str, project_path: str):
+        changes = code_changes.split("\n")
+        for change in changes:
+            parts = change.split(":", 2)
+            if len(parts) == 3:
+                filename, line_number, new_code = parts
+                file_path = os.path.join(project_path, filename)
+                if os.path.exists(file_path):
+                    with open(file_path, "r") as f:
+                        lines = f.readlines()
+
+                    line_index = int(line_number) - 1
+                    if 0 <= line_index < len(lines):
+                        lines[line_index] = new_code + "\n"
+
+                        with open(file_path, "w") as f:
+                            f.writelines(lines)
+
+                        print(
+                            colored(f"Updated {filename}, line {line_number}", "green")
+                        )
+                    else:
+                        print(
+                            colored(
+                                f"Invalid line number for {filename}: {line_number}",
+                                "red",
+                            )
+                        )
+                else:
+                    print(colored(f"File not found: {filename}", "red"))
+
+    async def feedback_improvement_cycle(self, project_path: str, user_feedback: str):
         print(colored("\nGathering improvement suggestions from the team...", "cyan"))
         suggestions = await asyncio.gather(
             *[
                 member.discuss(
-                    f"User feedback: {user_feedback}\n\nCurrent code:\n{current_code}\n\nProvide a plan on how to best implement the changes asked by the user (do not write full code)."
+                    f"User feedback: {user_feedback}\n\nProvide a plan on how to best implement the changes asked by the user (do not write full code)."
                 )
                 for member in self.members
             ]
@@ -413,84 +643,179 @@ Provide the full code wrapped in <code></code> tags."""
         lead_developer = next(
             member for member in self.members if isinstance(member, ProjectLead)
         )
-        improvement_prompt = f"User feedback: {user_feedback}\n\nTeam suggestions:\n{' '.join(suggestions)}\n\nCurrent code:\n{current_code}\n\nPlease improve the code based on the user feedback and the best elements from the team suggestions. Provide the full improved code wrapped in <code></code> tags."
+        improvement_prompt = f"User feedback: {user_feedback}\n\nTeam suggestions:\n{' '.join(suggestions)}\n\nPlease improve the code in the project directory based on the user feedback and the best elements from the team suggestions. Provide the full improved code for each file that needs changes, wrapped in <file>filename.ext</file> tags."
         improved_code_response = await lead_developer.discuss(improvement_prompt)
 
-        improved_code = (
-            improved_code_response.split("<code>")[1].split("</code>")[0].strip()
-        )
-        with open(file_path, "w") as f:
-            f.write(improved_code)
-        print(colored(f"Improved code written to {file_path}", "green"))
+        # Parse the response to extract file changes
+        file_changes = self.parse_file_changes(improved_code_response)
+
+        for filename, content in file_changes.items():
+            file_path = os.path.join(project_path, filename)
+            with open(file_path, "w") as f:
+                f.write(content)
+            print(colored(f"Updated file: {file_path}", "green"))
 
         # Run the code after improvement
-        await self.error_correction_cycle(file_path)
+        await self.error_correction_cycle(project_path)
+
+    async def generate_team_reports(self, project_description: str, discussion: str):
+        reports = []
+        for member in self.members:
+            report = await member.generate_report(project_description, discussion)
+            reports.append(report)
+            print(colored(f"\n{report}", member.ai_agent.print_color))
+        return "\n\n".join(reports)
+
+    async def generate_multi_file_code(self, project_description: str, discussion: str):
+        lead_developer = next(
+            member for member in self.members if isinstance(member, ProjectLead)
+        )
+        files = await lead_developer.generate_multi_file_code(
+            project_description, discussion
+        )
+
+        # Create a project directory
+        project_dir = "generated_project"
+        os.makedirs(project_dir, exist_ok=True)
+
+        for filename, content in files.items():
+            # Create the full path, including any subdirectories
+            file_path = os.path.join(project_dir, filename)
+            # Create the directory structure if it doesn't exist
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+            with open(file_path, "w") as f:
+                f.write(content)
+            print(colored(f"Created file: {file_path}", "green"))
+
+        return files
 
     async def run_project(self):
-        continue_from_file = (
-            input(
-                colored(
-                    "Do you want to continue from an existing file? (y/n): ", "cyan"
-                )
-            ).lower()
-            == "y"
-        )
-
-        if continue_from_file:
-            file_path = input(
-                colored("Enter the path to the existing Python file: ", "cyan")
-            )
-            while not os.path.exists(file_path) or not file_path.endswith(".py"):
-                print(
+        try:
+            continue_from_existing = (
+                input(
                     colored(
-                        "Error: The file does not exist or is not a Python file.", "red"
+                        "Do you want to continue from an existing project? (y/n): ",
+                        "cyan",
+                    )
+                ).lower()
+                == "y"
+            )
+
+            if continue_from_existing:
+                project_path = input(
+                    colored(
+                        "Enter the path to the existing project file or directory: ",
+                        "cyan",
                     )
                 )
-                file_path = input(
-                    colored("Please enter a valid Python file path: ", "cyan")
+                while not (os.path.isfile(project_path) or os.path.isdir(project_path)):
+                    print(
+                        colored(
+                            "Error: The specified path is not a valid file or directory.",
+                            "red",
+                        )
+                    )
+                    project_path = input(
+                        colored(
+                            "Please enter a valid project file or directory path: ",
+                            "cyan",
+                        )
+                    )
+            else:
+                project_description = input(
+                    colored("Enter project description: ", "cyan")
+                )
+                iterations = int(
+                    input(colored("Enter number of discussion iterations: ", "cyan"))
+                )
+                project_path = "generated_project"
+                os.makedirs(project_path, exist_ok=True)
+
+                print(colored("Starting project discussion...", "cyan"))
+                discussion = await self.discuss_project(project_description, iterations)
+
+                print(colored("Generating team reports...", "cyan"))
+                reports = await self.generate_team_reports(
+                    project_description, discussion
                 )
 
-            print(colored("Starting error correction phase...", "cyan"))
-            await self.error_correction_cycle(file_path)
+                print(colored("Generating multi-file code...", "cyan"))
+                files = await self.generate_multi_file_code(
+                    project_description, discussion
+                )
+
+                for filename, content in files.items():
+                    file_path = os.path.join(project_path, filename)
+                    with open(file_path, "w") as f:
+                        f.write(content)
+                    print(colored(f"Created file: {file_path}", "green"))
+
+            print(
+                colored(
+                    "Starting error correction and dependency installation cycle...",
+                    "cyan",
+                )
+            )
+            await self.error_correction_cycle(project_path)
+
+            print(colored("Entering feedback improvement phase...", "cyan"))
+            while True:
+                user_feedback = input(
+                    colored(
+                        "Enter feedback for improvement (or 'done' to finish): ",
+                        "yellow",
+                    )
+                )
+                if user_feedback.lower() == "done":
+                    break
+                await self.feedback_improvement_cycle(project_path, user_feedback)
+
+            print(
+                colored(
+                    f"Project completed! Final code has been written to {project_path}",
+                    "green",
+                )
+            )
+
+        except Exception as e:
+            print(colored(f"An unexpected error occurred: {str(e)}", "red"))
+            print(colored("Stack trace:", "yellow"))
+            import traceback
+
+            traceback.print_exc()
+
+    def parse_file_changes(self, response: str) -> Dict[str, str]:
+        file_changes = {}
+        file_matches = re.finditer(r"<file>(.*?)</file>", response, re.DOTALL)
+        for match in file_matches:
+            file_content = match.group(1).strip()
+            filename = file_content.split("\n", 1)[0].strip()
+            content = (
+                file_content.split("\n", 1)[1].strip() if "\n" in file_content else ""
+            )
+            file_changes[filename] = content
+        return file_changes
+
+    def execute_project(self, project_path: str) -> str:
+        if os.path.isfile(project_path):
+            script_path = project_path
         else:
-            project_description = input(colored("Enter project description: ", "cyan"))
-            iterations = int(
-                input(colored("Enter number of discussion iterations: ", "cyan"))
-            )
-            file_path = input(colored("Enter output file path: ", "cyan"))
-            while not file_path.endswith(".py"):
-                print(
-                    colored(
-                        "Error: The file must be a Python file with a .py extension.",
-                        "red",
-                    )
-                )
-                file_path = input(
-                    colored("Please enter a valid Python file path: ", "cyan")
-                )
+            python_files = [f for f in os.listdir(project_path) if f.endswith(".py")]
+            if not python_files:
+                return "No Python files found in the project directory."
+            script_path = os.path.join(project_path, python_files[0])
 
-            print(colored("Starting project discussion...", "cyan"))
-            discussion = await self.discuss_project(project_description, iterations)
-            await self.generate_code(project_description, discussion, file_path)
-            await self.error_correction_cycle(file_path)
-
-        print(colored("Entering feedback improvement phase...", "cyan"))
-        while True:
-            user_feedback = input(
-                colored(
-                    "Enter feedback for improvement (or 'done' to finish): ", "yellow"
-                )
+        try:
+            result = subprocess.run(
+                [sys.executable, script_path],
+                capture_output=True,
+                text=True,
+                check=True,
             )
-            if user_feedback.lower() == "done":
-                break
-            await self.feedback_improvement_cycle(file_path, user_feedback)
-
-        print(
-            colored(
-                f"Project completed! Final code has been written to {file_path}",
-                "green",
-            )
-        )
+            return ""  # No error
+        except subprocess.CalledProcessError as e:
+            return e.stderr
 
 
 # Create the team
