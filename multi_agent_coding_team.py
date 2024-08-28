@@ -801,10 +801,18 @@ Provide the full code wrapped in <code></code> tags."""
         if os.path.isfile(project_path):
             script_path = project_path
         else:
-            python_files = [f for f in os.listdir(project_path) if f.endswith(".py")]
+            # Search for Python files recursively
+            python_files = []
+            for root, dirs, files in os.walk(project_path):
+                python_files.extend(
+                    [os.path.join(root, f) for f in files if f.endswith(".py")]
+                )
+
             if not python_files:
-                return "No Python files found in the project directory."
-            script_path = os.path.join(project_path, python_files[0])
+                return "No Python files found in the project directory or its subdirectories."
+
+            # Choose the first Python file found (you might want to implement a more sophisticated selection method)
+            script_path = python_files[0]
 
         try:
             result = subprocess.run(
