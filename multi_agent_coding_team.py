@@ -46,6 +46,11 @@ class ProjectLead(TeamMember):
             "Project Lead / Full-Stack Developer",
             ["Python", "JavaScript", "React", "Node.js", "Project Management"],
         )
+        system_message = f"""You are {name}, the Project Lead and Full-Stack Developer of the team.
+Your role involves overseeing the project, making high-level decisions, and contributing to both frontend and backend development.
+Your skills include: Python, JavaScript, React, Node.js, and Project Management.
+In discussions, provide insights that reflect your leadership role and technical expertise."""
+
         self.ai_agent = UnifiedApis(
             name="Claude",
             provider="anthropic",
@@ -53,6 +58,9 @@ class ProjectLead(TeamMember):
             use_async=True,
             print_color="yellow",
         )
+
+        # Set the system message after initializing the UnifiedApis instance
+        self.ai_agent.set_system_message(system_message)
 
     def coordinate_team(self):
         print(
@@ -71,6 +79,11 @@ class AISpecialist(TeamMember):
             "AI Integration Specialist",
             ["Python", "Machine Learning", "NLP", "API Integration"],
         )
+        system_message = f"""You are {name}, the AI Integration Specialist of the team.
+Your role involves integrating AI features into the project, including machine learning, natural language processing, and API integration.
+Your skills include: Python, Machine Learning, NLP, and API Integration.
+In discussions, provide insights that reflect your expertise in AI integration."""
+
         self.ai_agent = UnifiedApis(
             name="GPT-4o",
             provider="openai",
@@ -78,6 +91,9 @@ class AISpecialist(TeamMember):
             use_async=True,
             print_color="magenta",
         )
+
+        # Set the system message after initializing the UnifiedApis instance
+        self.ai_agent.set_system_message(system_message)
 
     def integrate_ai_feature(self, feature: str):
         print(
@@ -96,13 +112,21 @@ class UIUXDesigner(TeamMember):
             "UI/UX Designer",
             ["Figma", "Adobe XD", "HTML", "CSS", "User Research"],
         )
+        system_message = f"""You are {name}, the UI/UX Designer of the team.
+Your role involves creating user-friendly and visually appealing designs for the project.
+Your skills include: Figma, Adobe XD, HTML, CSS, and User Research.
+In discussions, provide insights that reflect your expertise in UI/UX design."""
+
         self.ai_agent = UnifiedApis(
-            name="Gemini",
-            provider="openrouter",
-            model="google/gemini-pro-1.5",
+            name="Claude",
+            provider="anthropic",
+            model="claude-3-5-sonnet-20240620",
             use_async=True,
             print_color="cyan",
         )
+
+        # Set the system message after initializing the UnifiedApis instance
+        self.ai_agent.set_system_message(system_message)
 
     def create_design(self, component: str):
         print(
@@ -121,6 +145,11 @@ class BackendDeveloper(TeamMember):
             "Backend Developer",
             ["Python", "Django", "Flask", "Database Design", "API Development"],
         )
+        system_message = f"""You are {name}, the Backend Developer of the team.
+Your role involves implementing the backend of the project, including database design and API development.
+Your skills include: Python, Django, Flask, Database Design, and API Development.
+In discussions, provide insights that reflect your expertise in backend development."""
+
         self.ai_agent = UnifiedApis(
             name="DeepSeek",
             provider="openrouter",
@@ -128,6 +157,9 @@ class BackendDeveloper(TeamMember):
             use_async=True,
             print_color="green",
         )
+
+        # Set the system message after initializing the UnifiedApis instance
+        self.ai_agent.set_system_message(system_message)
 
     def implement_api_endpoint(self, endpoint: str):
         print(
@@ -144,6 +176,11 @@ class FrontendDeveloper(TeamMember):
         super().__init__(
             name, "Frontend Developer", ["JavaScript", "React", "Vue.js", "HTML", "CSS"]
         )
+        system_message = f"""You are {name}, the Frontend Developer of the team.
+Your role involves creating the user interface of the project, including components and layouts.
+Your skills include: JavaScript, React, Vue.js, HTML, and CSS.
+In discussions, provide insights that reflect your expertise in frontend development."""
+
         self.ai_agent = UnifiedApis(
             name="Sonnet-Coder",
             provider="anthropic",
@@ -151,6 +188,9 @@ class FrontendDeveloper(TeamMember):
             use_async=True,
             print_color="blue",
         )
+
+        # Set the system message after initializing the UnifiedApis instance
+        self.ai_agent.set_system_message(system_message)
 
     def create_component(self, component: str):
         print(
@@ -169,6 +209,11 @@ class SoftwareArchitect(TeamMember):
             "Software Architect",
             ["System Design", "Scalability", "Design Patterns", "Cloud Architecture"],
         )
+        system_message = f"""You are {name}, the Software Architect of the team.
+Your role involves designing the overall architecture of the project, including system design, scalability, and cloud architecture.
+Your skills include: System Design, Scalability, Design Patterns, and Cloud Architecture.
+In discussions, provide insights that reflect your expertise in software architecture."""
+
         self.ai_agent = UnifiedApis(
             name="GPT-4",
             provider="openai",
@@ -176,6 +221,9 @@ class SoftwareArchitect(TeamMember):
             use_async=True,
             print_color="blue",
         )
+
+        # Set the system message after initializing the UnifiedApis instance
+        self.ai_agent.set_system_message(system_message)
 
     def design_architecture(self, component: str):
         print(
@@ -199,6 +247,11 @@ class QualityAssuranceEngineer(TeamMember):
                 "Code Review",
             ],
         )
+        system_message = f"""You are {name}, the Quality Assurance Engineer of the team.
+Your role involves ensuring the quality of the project, including test automation, performance testing, security testing, and code review.
+Your skills include: Test Automation, Performance Testing, Security Testing, and Code Review.
+In discussions, provide insights that reflect your expertise in quality assurance."""
+
         self.ai_agent = UnifiedApis(
             name="Claude-QA",
             provider="anthropic",
@@ -206,6 +259,9 @@ class QualityAssuranceEngineer(TeamMember):
             use_async=True,
             print_color="magenta",
         )
+
+        # Set the system message after initializing the UnifiedApis instance
+        self.ai_agent.set_system_message(system_message)
 
     def review_code(self, component: str):
         print(
